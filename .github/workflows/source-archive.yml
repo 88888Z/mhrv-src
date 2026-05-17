@@ -8,6 +8,8 @@ permissions:
 jobs:
   archive:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -16,4 +18,11 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: mhrv-rs-custom-source.zip
+          files: source.zip
+      - name: Remove auto-generated codeload archive
+        run: |
+          gh api repos/${{ github.repository }}/releases/tags/${{ github.ref_name }} \
+            -q '.assets[] | select(.name | test("^source code")) | .id' \
+          | while read id; do
+              gh api repos/${{ github.repository }}/releases/assets/$id -X DELETE
+            done
