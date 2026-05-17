@@ -36,24 +36,28 @@ jobs:
           BEFORE=$(echo "$TAGS" | sed -n "/$CURRENT/q;p")
           TOTAL=$(echo "$BEFORE" | wc -l)
           PREV=$(echo "$BEFORE" | tail -1)
+          # Previous tag delta (always tiny)
           [ -n "$PREV" ] && git bundle create \
             "from-${PREV}-to-${CURRENT}.bundle" "$PREV..$CURRENT"
+          # Percentage checkpoints, but capped at last 25 tags
+          RECENT_COUNT=25
+          [ "$TOTAL" -gt "$RECENT_COUNT" ] && TOTAL="$RECENT_COUNT"
+          RECENT=$(echo "$BEFORE" | tail -$TOTAL)
           for PCT in 5 10 15 20 25 30 35 40 45 50; do
             IDX=$(( TOTAL * PCT / 100 ))
             [ "$IDX" -lt 1 ] && continue
-            TAG=$(echo "$BEFORE" | sed -n "${IDX}p")
+            [ "$IDX" -gt "$TOTAL" ] && continue
+            TAG=$(echo "$RECENT" | sed -n "${IDX}p")
             [ -z "$TAG" ] && continue
             [ "$TAG" = "$PREV" ] && continue
             git bundle create \
               "from-${TAG}-to-${CURRENT}.bundle" "$TAG..$CURRENT"
           done
-          git bundle create "full-${CURRENT}.bundle" --all
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.ref }}
-          files: |
-            from-*.bundle
-            full-*.bundle
+          files: from-*.bundle
+          overwrite: true
       - name: Remove auto-generated codeload archives
         run: |
           gh api repos/${{ github.repository }}/releases/tags/${{ steps.tag.outputs.ref }} \
