@@ -22,7 +22,7 @@ jobs:
         run: |
           REF="${{ inputs.ref || github.ref_name }}"
           if [ "$REF" = "main" ]; then
-            REF=$(gh api repos/${{ github.repository }}/git/refs/tags \
+            REF=$(gh api repos/therealaleph/MasterHttpRelayVPN-RUST/git/refs/tags \
               --paginate -q '[.[] | .ref | sub("refs/tags/"; "")] | last')
           fi
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
@@ -37,21 +37,17 @@ jobs:
           BEFORE=$(echo "$TAGS" | sed -n "/$CURRENT/q;p")
           TOTAL=$(echo "$BEFORE" | wc -l)
           PREV=$(echo "$BEFORE" | tail -1)
-          # Always build immediately-previous-tag delta
           [ -n "$PREV" ] && git bundle create \
             "from-${PREV}-to-${CURRENT}.bundle" "$PREV..$CURRENT"
-          # Build percentage checkpoints: 5%, 10%, ..., 50%
           for PCT in 5 10 15 20 25 30 35 40 45 50; do
             IDX=$(( TOTAL * PCT / 100 ))
             [ "$IDX" -lt 1 ] && continue
             TAG=$(echo "$BEFORE" | sed -n "${IDX}p")
             [ -z "$TAG" ] && continue
-            # Skip if same as previous-tag bundle (avoids duplicate upload)
             [ "$TAG" = "$PREV" ] && continue
             git bundle create \
               "from-${TAG}-to-${CURRENT}.bundle" "$TAG..$CURRENT"
           done
-          # Always build full bundle
           git bundle create "full-${CURRENT}.bundle" --all
       - uses: softprops/action-gh-release@v2
         with:
