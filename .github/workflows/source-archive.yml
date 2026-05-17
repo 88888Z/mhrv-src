@@ -1,0 +1,22 @@
+name: source-archive
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref (tag/branch/commit)'
+        required: true
+        default: 'v1.9.28'
+permissions:
+  contents: write
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - run: git archive --format=zip -o source.zip HEAD
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.ref }}
+          files: source.zip
