@@ -4,8 +4,12 @@ on:
     tags: ['v*']
   workflow_dispatch:
     inputs:
-      ref:
-        description: 'Tag to archive (leave empty for latest)'
+      current_version:
+        description: 'Your current local version (e.g. v1.9.26). Leave empty for first-time clone.'
+        required: false
+        type: string
+      target_version:
+        description: 'Target version to update to (default: latest)'
         required: false
         type: string
 permissions:
@@ -17,50 +21,51 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - name: Resolve tag
-        id: tag
+      - name: Resolve target
+        id: target
         run: |
-          REF="${{ inputs.ref || github.ref_name }}"
+          REF="${{ inputs.target_version || github.ref_name }}"
           if [ "$REF" = "main" ]; then
             REF=$(gh api repos/therealaleph/MasterHttpRelayVPN-RUST/releases/latest -q '.tag_name')
           fi
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ steps.tag.outputs.ref }}
-          fetch-depth: 0
-      - name: Build checkpoint bundles
+          ref: ${{ steps.target.outputs.ref }}
+      - name: Build source archive
         run: |
-          CURRENT=${{ steps.tag.outputs.ref }}
-          TAGS=$(git tag --sort=version:refname | grep '^v[0-9]')
-          BEFORE=$(echo "$TAGS" | sed -n "/$CURRENT/q;p")
-          TOTAL=$(echo "$BEFORE" | wc -l)
-          PREV=$(echo "$BEFORE" | tail -1)
-          # Previous tag delta (always tiny)
-          [ -n "$PREV" ] && git bundle create \
-            "from-${PREV}-to-${CURRENT}.bundle" "$PREV..$CURRENT"
-          # Percentage checkpoints, but capped at last 25 tags
-          RECENT_COUNT=25
-          [ "$TOTAL" -gt "$RECENT_COUNT" ] && TOTAL="$RECENT_COUNT"
-          RECENT=$(echo "$BEFORE" | tail -$TOTAL)
-          for PCT in 5 10 15 20 25 30 35 40 45 50; do
-            IDX=$(( TOTAL * PCT / 100 ))
-            [ "$IDX" -lt 1 ] && continue
-            [ "$IDX" -gt "$TOTAL" ] && continue
-            TAG=$(echo "$RECENT" | sed -n "${IDX}p")
-            [ -z "$TAG" ] && continue
-            [ "$TAG" = "$PREV" ] && continue
-            git bundle create \
-              "from-${TAG}-to-${CURRENT}.bundle" "$TAG..$CURRENT"
-          done
+          CURRENT=${{ steps.target.outputs.ref }}
+          CURRENT_LOCAL="${{ inputs.current_version }}"
+          if [ -z "$CURRENT_LOCAL" ] || [ "$CURRENT_LOCAL" = "main" ]; then
+            # First-time: source zip (no git history needed)
+            git archive --format=zip -o "source-${CURRENT}.zip" HEAD
+          else
+            # Update: patch files between versions (small)
+            git fetch --depth=1 origin "+refs/tags/${CURRENT_LOCAL}:refs/tags/${CURRENT_LOCAL}" \
+              https://github.com/therealaleph/MasterHttpRelayVPN-RUST.git \
+              "+refs/tags/${CURRENT_LOCAL}:refs/tags/${CURRENT_LOCAL}" 2>/dev/null || true
+            git format-patch -o patches "$CURRENT_LOCAL..$CURRENT"
+            tar czf "patches-${CURRENT_LOCAL}-to-${CURRENT}.tar.gz" patches/
+          fi
+          # Auto-trigger: always include previous-tag patches
+          if [ "${{ github.event_name }}" = "push" ]; then
+            PREV=$(git tag --sort=version:refname | grep '^v[0-9]' \
+              | sed -n "/$CURRENT/q;p" | tail -1)
+            if [ -n "$PREV" ]; then
+              git format-patch -o prev-patches "$PREV..$CURRENT"
+              tar czf "patches-${PREV}-to-${CURRENT}.tar.gz" prev-patches/
+            fi
+          fi
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.ref }}
-          files: from-*.bundle
+          tag_name: ${{ steps.target.outputs.ref }}
+          files: |
+            source-*.zip
+            patches-*.tar.gz
           overwrite: true
       - name: Remove auto-generated codeload archives
         run: |
-          gh api repos/${{ github.repository }}/releases/tags/${{ steps.tag.outputs.ref }} \
+          gh api repos/${{ github.repository }}/releases/tags/${{ steps.target.outputs.ref }} \
             -q '.assets[] | select(.name | test("^[Ss]ource [Cc]ode")) | .id' \
           | while read id; do
               gh api repos/${{ github.repository }}/releases/assets/$id -X DELETE
