@@ -3,6 +3,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag to archive (leave empty for latest)'
+        required: false
+        type: string
 permissions:
   contents: write
 jobs:
@@ -12,17 +17,44 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve tag
+        id: tag
+        run: |
+          REF="${{ inputs.ref || github.ref_name }}"
+          if [ "$REF" = "main" ]; then
+            REF=$(gh api repos/${{ github.repository }}/git/refs/tags \
+              --paginate -q '[.[] | .ref | sub("refs/tags/"; "")] | last')
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
-      - run: git archive --format=zip -o source.zip HEAD
+          ref: ${{ steps.tag.outputs.ref }}
+          fetch-depth: 0
+      - name: Build checkpoint bundles
+        run: |
+          CURRENT=${{ steps.tag.outputs.ref }}
+          TAGS=$(git tag --sort=version:refname | grep '^v[0-9]')
+          BEFORE=$(echo "$TAGS" | sed -n "/$CURRENT/q;p")
+          PREV=$(echo "$BEFORE" | tail -1)
+          [ -n "$PREV" ] && git bundle create \
+            "from-${PREV}-to-${CURRENT}.bundle" "$PREV..$CURRENT"
+          TOTAL=$(echo "$TAGS" | wc -l)
+          for PCT in 5 10 15 20 25 30 35 40 45 50; do
+            IDX=$(( TOTAL * PCT / 100 ))
+            [ "$IDX" -le 0 ] && continue
+            TAG=$(echo "$TAGS" | sed -n "${IDX}p")
+            [ -z "$TAG" ] || [ "$TAG" = "$CURRENT" ] || [ "$TAG" = "$PREV" ] && continue
+            git bundle create \
+              "from-${TAG}-to-${CURRENT}.bundle" "$TAG..$CURRENT"
+          done
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          files: source.zip
-      - name: Remove auto-generated codeload archive
+          tag_name: ${{ steps.tag.outputs.ref }}
+          files: from-*.bundle
+      - name: Remove auto-generated codeload archives
         run: |
-          gh api repos/${{ github.repository }}/releases/tags/${{ github.ref_name }} \
-            -q '.assets[] | select(.name | test("^source code")) | .id' \
+          gh api repos/${{ github.repository }}/releases/tags/${{ steps.tag.outputs.ref }} \
+            -q '.assets[] | select(.name | test("^[Ss]ource [Cc]ode")) | .id' \
           | while read id; do
               gh api repos/${{ github.repository }}/releases/assets/$id -X DELETE
             done
