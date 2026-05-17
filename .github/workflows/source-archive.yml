@@ -1,11 +1,8 @@
 name: source-archive
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
-    inputs:
-      ref:
-        description: 'Git ref (tag/branch/commit)'
-        required: true
-        default: 'v1.9.28'
 permissions:
   contents: write
 jobs:
@@ -14,9 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ github.ref_name }}
       - run: git archive --format=zip -o source.zip HEAD
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.ref }}
-          files: source.zip
+          tag_name: ${{ github.ref_name }}
+          files: mhrv-rs-custom-source.zip
