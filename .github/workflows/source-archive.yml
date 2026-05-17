@@ -35,22 +35,30 @@ jobs:
           CURRENT=${{ steps.tag.outputs.ref }}
           TAGS=$(git tag --sort=version:refname | grep '^v[0-9]')
           BEFORE=$(echo "$TAGS" | sed -n "/$CURRENT/q;p")
+          TOTAL=$(echo "$BEFORE" | wc -l)
           PREV=$(echo "$BEFORE" | tail -1)
+          # Always build immediately-previous-tag delta
           [ -n "$PREV" ] && git bundle create \
             "from-${PREV}-to-${CURRENT}.bundle" "$PREV..$CURRENT"
-          TOTAL=$(echo "$TAGS" | wc -l)
+          # Build percentage checkpoints: 5%, 10%, ..., 50%
           for PCT in 5 10 15 20 25 30 35 40 45 50; do
             IDX=$(( TOTAL * PCT / 100 ))
-            [ "$IDX" -le 0 ] && continue
-            TAG=$(echo "$TAGS" | sed -n "${IDX}p")
-            [ -z "$TAG" ] || [ "$TAG" = "$CURRENT" ] || [ "$TAG" = "$PREV" ] && continue
+            [ "$IDX" -lt 1 ] && continue
+            TAG=$(echo "$BEFORE" | sed -n "${IDX}p")
+            [ -z "$TAG" ] && continue
+            # Skip if same as previous-tag bundle (avoids duplicate upload)
+            [ "$TAG" = "$PREV" ] && continue
             git bundle create \
               "from-${TAG}-to-${CURRENT}.bundle" "$TAG..$CURRENT"
           done
+          # Always build full bundle
+          git bundle create "full-${CURRENT}.bundle" --all
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.ref }}
-          files: from-*.bundle
+          files: |
+            from-*.bundle
+            full-*.bundle
       - name: Remove auto-generated codeload archives
         run: |
           gh api repos/${{ github.repository }}/releases/tags/${{ steps.tag.outputs.ref }} \
