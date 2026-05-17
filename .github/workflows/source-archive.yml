@@ -22,8 +22,7 @@ jobs:
         run: |
           REF="${{ inputs.ref || github.ref_name }}"
           if [ "$REF" = "main" ]; then
-            REF=$(gh api repos/therealaleph/MasterHttpRelayVPN-RUST/git/refs/tags \
-              --paginate -q '[.[] | .ref | sub("refs/tags/"; "")] | last')
+            REF=$(gh api repos/therealaleph/MasterHttpRelayVPN-RUST/releases/latest -q '.tag_name')
           fi
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
